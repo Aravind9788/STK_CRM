@@ -1,0 +1,11 @@
+fastapi 
+uvicorn 
+sqlalchemy 
+pymysql 
+python-jose 
+pandas
+argon2-cffi
+passlib==1.7.4 
+bcrypt==3.2.2
+cryptography
+dotenv
