@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,15 +9,48 @@ import {
   TouchableOpacity,
   Image,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { SERVER_URL } from '../../config';
+import { fetchWithToken, setNavigationRef } from '../../fetchWithToken';
 
 // --- Theme Colors ---
-const THEME_BLUE = '#003478'; 
+const THEME_BLUE = '#003478';
 const BG_LIGHT = '#f8f9fa';
 const CARD_WHITE = '#ffffff';
 
 const DirectorDashboard = ({ navigation }: any) => {
+  const [stats, setStats] = useState({
+    total_delivered_count: 0,
+    pending_deliveries_count: 0,
+    leads_completed_count: 0,
+    leads_pending_count: 0,
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setNavigationRef(navigation);
+    fetchStats();
+  }, []);
+
+  const fetchStats = async () => {
+    try {
+      const response = await fetchWithToken(`${SERVER_URL}/director-dashboard/stats`);
+
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data);
+      } else {
+        console.error('Failed to fetch director stats');
+      }
+    } catch (error) {
+      console.error('Error fetching director stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={BG_LIGHT} />
@@ -29,12 +62,12 @@ const DirectorDashboard = ({ navigation }: any) => {
           style={styles.logo}
         />
         <TouchableOpacity>
-           <Icon name="bell-badge-outline" size={26} color={THEME_BLUE} />
+          <Icon name="bell-badge-outline" size={26} color={THEME_BLUE} />
         </TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom: 30}}>
-        
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+
         {/* 2. Welcome Section */}
         <View style={styles.headerTextSection}>
           <Text style={styles.welcomeText}>Executive Overview</Text>
@@ -43,47 +76,53 @@ const DirectorDashboard = ({ navigation }: any) => {
         </View>
 
         {/* 3. FOUR KEY SUMMARY TOPICS */}
-        <View style={styles.statsGrid}>
-          {/* Row 1: Deliveries */}
-          <View style={styles.statCard}>
-            <View style={[styles.iconCircle, {backgroundColor: '#ecfdf5'}]}>
-               <Icon name="truck-check" size={24} color="#10b981" />
-            </View>
-            <Text style={styles.statValue}>1,240</Text>
-            <Text style={styles.statLabel}>Total Delivery Completed</Text>
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={THEME_BLUE} />
           </View>
+        ) : (
+          <View style={styles.statsGrid}>
+            {/* Row 1: Deliveries */}
+            <View style={styles.statCard}>
+              <View style={[styles.iconCircle, { backgroundColor: '#ecfdf5' }]}>
+                <Icon name="truck-check" size={24} color="#10b981" />
+              </View>
+              <Text style={styles.statValue}>{stats.total_delivered_count.toLocaleString()}</Text>
+              <Text style={styles.statLabel}>Total Delivery Completed</Text>
+            </View>
 
-          <View style={styles.statCard}>
-            <View style={[styles.iconCircle, {backgroundColor: '#fef2f2'}]}>
-               <Icon name="truck-delivery-outline" size={24} color="#ef4444" />
+            <View style={styles.statCard}>
+              <View style={[styles.iconCircle, { backgroundColor: '#fef2f2' }]}>
+                <Icon name="truck-delivery-outline" size={24} color="#ef4444" />
+              </View>
+              <Text style={styles.statValue}>{stats.pending_deliveries_count}</Text>
+              <Text style={styles.statLabel}>Pending Deliveries</Text>
             </View>
-            <Text style={styles.statValue}>85</Text>
-            <Text style={styles.statLabel}>Pending Deliveries</Text>
-          </View>
 
-          {/* Row 2: Leads */}
-          <View style={styles.statCard}>
-            <View style={[styles.iconCircle, {backgroundColor: '#eff6ff'}]}>
-               <Icon name="account-check-outline" size={24} color="#3b82f6" />
+            {/* Row 2: Leads */}
+            <View style={styles.statCard}>
+              <View style={[styles.iconCircle, { backgroundColor: '#eff6ff' }]}>
+                <Icon name="account-check-outline" size={24} color="#3b82f6" />
+              </View>
+              <Text style={styles.statValue}>{stats.leads_completed_count}</Text>
+              <Text style={styles.statLabel}>Leads Completed</Text>
             </View>
-            <Text style={styles.statValue}>458</Text>
-            <Text style={styles.statLabel}>Leads Completed</Text>
-          </View>
 
-          <View style={styles.statCard}>
-            <View style={[styles.iconCircle, {backgroundColor: '#fff7ed'}]}>
-               <Icon name="account-clock-outline" size={24} color="#f97316" />
+            <View style={styles.statCard}>
+              <View style={[styles.iconCircle, { backgroundColor: '#fff7ed' }]}>
+                <Icon name="account-clock-outline" size={24} color="#f97316" />
+              </View>
+              <Text style={styles.statValue}>{stats.leads_pending_count}</Text>
+              <Text style={styles.statLabel}>Pending Leads</Text>
             </View>
-            <Text style={styles.statValue}>112</Text>
-            <Text style={styles.statLabel}>Pending Leads</Text>
           </View>
-        </View>
+        )}
 
         {/* 4. NAVIGATION MODULES */}
         <View style={styles.sectionLabelContainer}>
-           <Text style={styles.sectionTitle}>Performance Portals</Text>
+          <Text style={styles.sectionTitle}>Performance Portals</Text>
         </View>
-        
+
         <View style={styles.buttonGrid}>
           {/* Sales Portal Button */}
           <TouchableOpacity
@@ -91,8 +130,8 @@ const DirectorDashboard = ({ navigation }: any) => {
             activeOpacity={0.85}
             onPress={() => navigation.navigate('TeamLeadSales')}
           >
-            <View style={[styles.moduleIcon, {backgroundColor: '#e0e7ff'}]}>
-               <Icon name="chart-line" size={32} color={THEME_BLUE} />
+            <View style={[styles.moduleIcon, { backgroundColor: '#e0e7ff' }]}>
+              <Icon name="chart-line" size={32} color={THEME_BLUE} />
             </View>
             <Text style={styles.cardTitle}>Sales Performance</Text>
             <Text style={styles.cardSub}>Analyze lead conversion & executive efficiency</Text>
@@ -104,11 +143,44 @@ const DirectorDashboard = ({ navigation }: any) => {
             activeOpacity={0.85}
             onPress={() => navigation.navigate('StoreManagerPerformance')}
           >
-            <View style={[styles.moduleIcon, {backgroundColor: '#ccfbf1'}]}>
-               <Icon name="warehouse" size={32} color="#0f766e" />
+            <View style={[styles.moduleIcon, { backgroundColor: '#ccfbf1' }]}>
+              <Icon name="warehouse" size={32} color="#0f766e" />
             </View>
             <Text style={styles.cardTitle}>Store Management</Text>
             <Text style={styles.cardSub}>Monitor inventory & delivery logistics</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 5. STAFF MANAGEMENT SECTION */}
+        <View style={styles.sectionLabelContainer}>
+          <Text style={styles.sectionTitle}>Staff Management</Text>
+        </View>
+
+        <View style={styles.buttonGrid}>
+          {/* Create Team Lead Button */}
+          <TouchableOpacity
+            style={styles.navButton}
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('AddTeamLeadScreen')}
+          >
+            <View style={[styles.moduleIcon, { backgroundColor: '#fef3c7' }]}>
+              <Icon name="account-tie" size={32} color="#d97706" />
+            </View>
+            <Text style={styles.cardTitle}>Create Team Lead</Text>
+            <Text style={styles.cardSub}>Add new team lead with auto-generated ID</Text>
+          </TouchableOpacity>
+
+          {/* Create Store Manager Button */}
+          <TouchableOpacity
+            style={styles.navButton}
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('AddStoreManagerScreen')}
+          >
+            <View style={[styles.moduleIcon, { backgroundColor: '#ddd6fe' }]}>
+              <Icon name="briefcase-account" size={32} color="#7c3aed" />
+            </View>
+            <Text style={styles.cardTitle}>Create Store Manager</Text>
+            <Text style={styles.cardSub}>Add new store manager with auto-generated ID</Text>
           </TouchableOpacity>
         </View>
 
@@ -194,6 +266,11 @@ const styles = StyleSheet.create({
     color: '#64748B',
     fontWeight: '600',
     marginTop: 2,
+  },
+  loadingContainer: {
+    padding: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionLabelContainer: {
     paddingHorizontal: 20,

@@ -15,6 +15,8 @@ import {
   Platform,
   FlatList
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { fetchWithToken, setNavigationRef } from '../../fetchWithToken';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SERVER_URL } from '../../config';
 
@@ -191,6 +193,19 @@ const NewLeadScreen = ({ navigation }: any) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  // ... existing states
+  const [showTataBrandDropdown, setShowTataBrandDropdown] = useState(false);
+  const [showTataThicknessDropdown, setShowTataThicknessDropdown] = useState(false);
+
+  // --- NEW: Timestamp State ---
+  const [timeLogs, setTimeLogs] = useState({
+    leadStart: INITIAL_DATA.createdOn, // Start when screen loads
+    leadEnd: '',
+    approverStart: '',
+    approverEnd: '',
+    quoteStart: '',
+    quoteEnd: ''
+  });
 
   // Dynamic options from master data
   const [boardTypeOptions, setBoardTypeOptions] = useState<string[]>([]);
@@ -199,8 +214,33 @@ const NewLeadScreen = ({ navigation }: any) => {
   const [tataOptions, setTataOptions] = useState<string[]>([]);
   const [accessoryOptions, setAccessoryOptions] = useState<AccessoryCategory[]>([]);
 
+  const [quotationId, setQuotationId] = useState('');
+  const [quotationDate, setQuotationDate] = useState('');
+
   const updateField = (key: keyof LeadData, value: any) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const generateQuotationId = () => {
+    const today = new Date();
+
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+
+    const random = Math.floor(100 + Math.random() * 900); // 3 digit
+
+    return `QT-${yyyy}-${mm}-${dd}-${random}`;
+  };
+
+  const getTodayDate = () => {
+    const today = new Date();
+
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+
+    return `${yyyy}-${mm}-${dd}`;
   };
 
   // Search functionality
@@ -232,10 +272,12 @@ const NewLeadScreen = ({ navigation }: any) => {
 
   // Fetch master data
   useEffect(() => {
+    setNavigationRef(navigation);
+
     const fetchMasterData = async () => {
       try {
         // This would be your actual API call
-        const res = await fetch(`${SERVER_URL}/master-data`);
+        const res = await fetchWithToken(`${SERVER_URL}/master-data`);
         const data = await res.json();
 
         setMasterData(data);
@@ -474,21 +516,63 @@ const NewLeadScreen = ({ navigation }: any) => {
     }, 800);
   };
 
-  const submitQuotation = async () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      Alert.alert('Success', 'Quotation sent via WhatsApp!');
-    }, 1500);
-  };
+
 
   const sendToApprover = async () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      setLoading(true);
+
+      const lead_end = new Date().toISOString();
+      const quote_end = new Date().toISOString();
+      const approve_request_at = new Date().toISOString();
+
+      setTimeLogs(prev => ({
+        ...prev,
+        leadEnd: lead_end,
+        quoteEnd: quote_end,
+        approverStart: approve_request_at
+      }));
+
+      // 1️⃣ Generate quotation first
+      const quotationResult = await generateQuotation();
+
+      // Assume backend returns these
+      const { lead_code, qoutaion_id } = quotationResult;
+
+      // 2️⃣ Submit for approval
+      const approvalPayload = {
+        lead_id: lead_code,  // Using lead_code as the identifier
+        quotation_id: qoutaion_id,  // Note: backend has typo "qoutaion_id"
+        sent_at: new Date().toISOString()
+      };
+
+      const response = await fetch(
+        `${SERVER_URL}/quotations/submit-quotation-approval`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(approvalPayload),
+        }
+      );
+
+      const result = await response.json();
+      console.log('APPROVAL RESPONSE:', result);
+
+      if (!response.ok) {
+        throw new Error(result?.message || 'Failed to submit for approval');
+      }
+
       Alert.alert('Success', 'Quotation sent to approver for review!');
-    }, 1500);
+    } catch (error: any) {
+      console.error(error);
+      Alert.alert('Error', error.message || 'Unable to send to approver');
+    } finally {
+      setLoading(false);
+    }
   };
+
 
   // --- Reusable Toggle Switch Component ---
   const MovableSwitch = ({
@@ -598,7 +682,7 @@ const NewLeadScreen = ({ navigation }: any) => {
         </View>
         <View style={styles.infoTextContainer}>
           <Text style={styles.infoLabel}>Lead Created On:</Text>
-          <Text style={styles.infoValue}>{formData.createdOn}</Text>
+          <Text style={styles.infoValue}>{formatTime(formData.createdOn, false)}</Text>
         </View>
       </View>
 
@@ -905,27 +989,116 @@ const NewLeadScreen = ({ navigation }: any) => {
       </View>
 
       {/* TATA Variants */}
+      {/* --- CHANNEL VARIANTS (Split UI: Brand & Thickness) --- */}
       <Text style={styles.label}>Channel Variants</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.chipScroll}>
-        {tataOptions.map((t) => (
-          <TouchableOpacity
-            key={t}
-            style={[styles.chip, formData.tataType === t && styles.chipActive]}
-            onPress={() => updateField('tataType', t)}>
-            <Text
-              style={[
-                styles.chipText,
-                formData.tataType === t && styles.chipTextActive,
-              ]}>
-              {t}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
 
+      {(() => {
+        // 1. Parsing Logic
+        const currentTataString = formData.tataType || '';
+        const firstSpaceIndex = currentTataString.indexOf(' ');
+
+        const currentBrand = firstSpaceIndex > -1 ? currentTataString.substring(0, firstSpaceIndex) : currentTataString;
+        const currentThickness = firstSpaceIndex > -1 ? currentTataString.substring(firstSpaceIndex + 1) : '';
+
+        // 2. Options Logic
+        const uniqueBrands = Array.from(new Set(tataOptions.map(opt => {
+          const idx = opt.indexOf(' ');
+          return idx > -1 ? opt.substring(0, idx) : opt;
+        })));
+
+        const availableThicknesses = tataOptions
+          .filter(opt => opt.startsWith(currentBrand))
+          .map(opt => {
+            const idx = opt.indexOf(' ');
+            return idx > -1 ? opt.substring(idx + 1) : '';
+          })
+          .filter(Boolean);
+
+        return (
+          // Added zIndex to the parent Row to ensure dropdowns float over elements below
+          <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16, zIndex: 2000 }}>
+
+            {/* === LEFT: BRAND DROPDOWN === */}
+            <View style={{ flex: 1, zIndex: showTataBrandDropdown ? 2000 : 1 }}>
+              <Text style={styles.inputLabelSmall}>Brand</Text>
+              <TouchableOpacity
+                style={styles.pickerBox}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setShowTataBrandDropdown(!showTataBrandDropdown);
+                  setShowTataThicknessDropdown(false); // Close other
+                }}
+              >
+                <Text style={styles.pickerText}>{currentBrand || 'Select'}</Text>
+                <Icon name={showTataBrandDropdown ? "chevron-up" : "chevron-down"} size={20} color="#004aad" />
+              </TouchableOpacity>
+
+              {showTataBrandDropdown && (
+                <View style={styles.dropdownOverlay}>
+                  <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }}>
+                    {uniqueBrands.map((brand, idx) => (
+                      <TouchableOpacity
+                        key={idx}
+                        style={[styles.dropdownItem, idx === uniqueBrands.length - 1 && { borderBottomWidth: 0 }]}
+                        onPress={() => {
+                          const firstOption = tataOptions.find(o => o.startsWith(brand));
+                          if (firstOption) updateField('tataType', firstOption);
+                          setShowTataBrandDropdown(false);
+                        }}
+                      >
+                        <Text style={[styles.dropdownItemText, currentBrand === brand && { color: '#004aad', fontWeight: '700' }]}>
+                          {brand}
+                        </Text>
+                        {currentBrand === brand && <Icon name="check" size={16} color="#004aad" />}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+
+            {/* === RIGHT: THICKNESS DROPDOWN === */}
+            <View style={{ flex: 1, zIndex: showTataThicknessDropdown ? 2000 : 1 }}>
+              <Text style={styles.inputLabelSmall}>Thickness</Text>
+              <TouchableOpacity
+                style={styles.pickerBox}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setShowTataThicknessDropdown(!showTataThicknessDropdown);
+                  setShowTataBrandDropdown(false); // Close other
+                }}
+              >
+                <Text style={styles.pickerText}>{currentThickness || 'Select'}</Text>
+                <Icon name={showTataThicknessDropdown ? "chevron-up" : "chevron-down"} size={20} color="#004aad" />
+              </TouchableOpacity>
+
+              {showTataThicknessDropdown && (
+                <View style={styles.dropdownOverlay}>
+                  <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }}>
+                    {availableThicknesses.map((thick, idx) => (
+                      <TouchableOpacity
+                        key={idx}
+                        style={[styles.dropdownItem, idx === availableThicknesses.length - 1 && { borderBottomWidth: 0 }]}
+                        onPress={() => {
+                          const newSelection = `${currentBrand} ${thick}`;
+                          updateField('tataType', newSelection);
+                          setShowTataThicknessDropdown(false);
+                        }}
+                      >
+                        <Text style={[styles.dropdownItemText, currentThickness === thick && { color: '#004aad', fontWeight: '700' }]}>
+                          {thick}
+                        </Text>
+                        {currentThickness === thick && <Icon name="check" size={16} color="#004aad" />}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+
+          </View>
+        );
+      })()}
       {/* --- FOLLOW-UP URGENCY (Scrollable like Thickness) --- */}
       <Text style={styles.label}>Follow-up Urgency</Text>
 
@@ -1202,12 +1375,23 @@ const NewLeadScreen = ({ navigation }: any) => {
     </View>
   );
 
+  const qoutationStartTime = () => {
+    setLoading(true);
+    const quoteStart = new Date().toISOString();
+    setTimeLogs(prev => ({
+      ...prev,
+      quoteStart: quoteStart
+    }));
+    setCurrentStep(6);
+  }
+
   const generateQuotation = async () => {
     try {
       setLoading(true);
 
       const payload = {
-        timestamp: new Date().toISOString(),
+        lead_created_at: timeLogs.leadStart || null,
+
         source: formData.leadSource,
         customer_name: formData.fullName,
         phone: formData.phone,
@@ -1215,19 +1399,33 @@ const NewLeadScreen = ({ navigation }: any) => {
         district: formData.district,
 
         profile: formData.customerProfile,
-        process_type: formData.projectType,    // AREA | MATERIAL
+        area_sqft: formData.areaSqft ? Number(formData.areaSqft) : null,
 
-        area_sqft: Number(formData.areaSqft) || null,
+        project_type: formData.projectType || null,
+        board_type: formData.boardType || null,
+        material_brand: formData.brand || null,
+        channel: formData.channelType || null,
+        channel_thickness: formData.tataType || null,
 
-        category_interest: formData.boardType,
-        brand_preference: formData.brand,
+        material_category: isMaterialMode ? formData.boardType : null,
+        material_quantity: isMaterialMode ? Number(materialQty) : null,
+        accessory_name: isMaterialMode ? selectedAccessory : null,
+        accessory_qty: isMaterialMode ? Number(accessoryQty) : null,
+        urgency: formData.urgency || "Normal",
 
-        urgency: formData.urgency,
-        follow_up_date: new Date().toISOString(),             // REQUIRED
-        sales_executive_id: "SE-001"            // REQUIRED
+        lead_ended_at: timeLogs.leadEnd || null,
+
+        quotation_created_at: timeLogs.quoteStart || null,
+        quotation_id: quotationId,
+        total_estimated_cost: formData.totalCost
+          ? Number(formData.totalCost)
+          : null,
+        quotation_ended_at: timeLogs.quoteEnd || null,
+
+        approver_request_at: timeLogs.approverStart || null
       };
 
-      const response = await fetch(`${SERVER_URL}/leads`, {
+      const response = await fetchWithToken(`${SERVER_URL}/leads/create-lead`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1239,7 +1437,10 @@ const NewLeadScreen = ({ navigation }: any) => {
 
       const result = await response.json();
       console.log('Lead created:', result);
-      setCurrentStep(6);
+
+      Alert.alert('Alert', 'Quotation sent');
+      return result;
+
 
     } catch (error) {
       console.log(error);
@@ -1248,6 +1449,52 @@ const NewLeadScreen = ({ navigation }: any) => {
       setLoading(false);
     }
   };
+
+  const calculateDuration = (start?: string, end?: string) => {
+    if (!start || !end) return null;
+
+    const startTime = new Date(start).getTime();
+    const endTime = new Date(end).getTime();
+
+    if (endTime <= startTime) return null;
+
+    const diffMs = endTime - startTime;
+
+    const totalSeconds = Math.floor(diffMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    return `${hours}h ${minutes}m ${seconds}s`;
+  };
+
+  const formatTime = (isoString?: string, preview?: boolean) => {
+    if (!isoString) return null;
+    if (!preview) return false;
+
+    const date = new Date(isoString);
+
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+
+    let hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12; // convert 0 → 12
+    const formattedHours = String(hours).padStart(2, '0');
+    if (preview) {
+      return `${formattedHours}:${minutes}:${seconds} ${ampm}`;
+    }
+    else { return `${day}-${month}-${year} ${formattedHours}:${minutes}:${seconds} ${ampm}` }
+  };
+
+  useEffect(() => {
+    setQuotationId(generateQuotationId());
+    setQuotationDate(getTodayDate());
+  }, []);
 
 
   // STEP 5: COST BREAKDOWN
@@ -1316,7 +1563,7 @@ const NewLeadScreen = ({ navigation }: any) => {
       <View style={styles.buttonSpacingSmall} />
       <TouchableOpacity
         style={styles.primaryBtn}
-        onPress={generateQuotation}>
+        onPress={qoutationStartTime}>
         {loading ? (
           <ActivityIndicator color="#fff" />
         ) : (
@@ -1339,9 +1586,14 @@ const NewLeadScreen = ({ navigation }: any) => {
           <View style={styles.previewHeaderContent}>
             <Text style={styles.companyName}>STK Associates</Text>
             <View style={styles.quoteInfo}>
-              <Text style={styles.quoteId}>Quotation #: QT-2024-10-26-001</Text>
-              <Text style={styles.quoteDate}>Date: 2024-10-26</Text>
+              <Text style={styles.quoteId}>
+                Quotation #: {quotationId}
+              </Text>
+              <Text style={styles.quoteDate}>
+                Date: {quotationDate}
+              </Text>
             </View>
+
           </View>
         </View>
 
@@ -1432,6 +1684,62 @@ const NewLeadScreen = ({ navigation }: any) => {
           </Text>
         </View>
       </View>
+      <View style={styles.timestampCard}>
+
+        {/* ===== Lead Timestamp ===== */}
+        <Text style={styles.timestampHeader}>Lead Timestamp</Text>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timestampLabel}>Started At:</Text>
+          <Text style={styles.timestampValue}>
+            {formatTime(timeLogs.leadStart, true) || '--'}
+          </Text>
+        </View>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timestampLabel}>Ended At:</Text>
+          <Text style={styles.timestampValue}>
+            {formatTime(timeLogs.leadEnd, true) || 'Click Send to Approver'}
+          </Text>
+        </View>
+
+        <Text style={styles.timestampHeader}>Time Taken</Text>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timeTakenValue}>
+            {calculateDuration(timeLogs.leadStart, timeLogs.leadEnd) || '--'}
+          </Text>
+        </View>
+
+        {/* ===== Quotation Timestamp ===== */}
+        <Text style={[styles.timestampHeader, { marginTop: 16 }]}>
+          Quotation Timestamp
+        </Text>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timestampLabel}>Started At:</Text>
+          <Text style={styles.timestampValue}>
+            {formatTime(timeLogs.quoteStart, true) || '--'}
+          </Text>
+        </View>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timestampLabel}>Ended At:</Text>
+          <Text style={styles.timestampValue}>
+            {formatTime(timeLogs.quoteEnd, true) || 'Click Send to Approver'}
+          </Text>
+        </View>
+
+        <Text style={styles.timestampHeader}>Time Taken</Text>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timeTakenValue}>
+            {calculateDuration(timeLogs.quoteStart, timeLogs.quoteEnd) || '--'}
+          </Text>
+        </View>
+
+      </View>
+
 
       <TouchableOpacity style={styles.primaryBtn} onPress={() => { }}>
         <Icon name="file-pdf-box" size={20} color="#fff" />
@@ -1439,12 +1747,13 @@ const NewLeadScreen = ({ navigation }: any) => {
       </TouchableOpacity>
 
       <View style={styles.buttonSpacingSmall} />
-      <TouchableOpacity style={styles.whatsappBtn} onPress={submitQuotation}>
+      {/* <TouchableOpacity style={styles.whatsappBtn}>
         <Icon name="whatsapp" size={20} color="#fff" />
         <Text style={styles.actionBtnText}>Send via WhatsApp</Text>
-      </TouchableOpacity>
+      </TouchableOpacity> */}
+      <View style={styles.divider} />
 
-      <View style={styles.buttonSpacingSmall} />
+
       <TouchableOpacity style={styles.approverBtn} onPress={sendToApprover}>
         <Icon name="shield-check-outline" size={20} color="#fff" />
         <Text style={styles.actionBtnText}>Send to Approver</Text>
@@ -1686,6 +1995,23 @@ const styles = StyleSheet.create({
         paddingTop: StatusBar.currentHeight || 0,
       },
     }),
+  },
+
+  dropdownOverlay: {
+    position: 'absolute',
+    top: '100%', // Positions it right below the picker box
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#cccccc',
+    elevation: 5, // Android Shadow
+    shadowColor: '#000', // iOS Shadow
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    zIndex: 9999, // Ensures it sits on top
   },
   container: {
     padding: 20,
@@ -2203,7 +2529,7 @@ const styles = StyleSheet.create({
     padding: 14,
     backgroundColor: '#ffffff',
     borderRadius: 8,
-    marginBottom: 16,
+    marginBottom: 5,
     borderWidth: 1,
     borderColor: '#cccccc',
     height: 48,
@@ -2821,6 +3147,60 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  timestampCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e6f0ff',
+    marginBottom: 16,
+
+    // Android elevation
+    elevation: 4,
+
+    // iOS shadow
+    shadowColor: '#002d69',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+  },
+
+
+  timestampHeader: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#002d69',
+    marginBottom: 10,
+  },
+
+  timestampRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+
+  timestampLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#555',
+    width: 90, // keeps alignment clean
+  },
+
+  timestampValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#004aad',
+  },
+  timeTakenValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#e0ae07ff',
+  },
+
+  divider: {
+    height: 14,
   },
 });
 

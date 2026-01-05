@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,31 +8,75 @@ import {
   SafeAreaView,
   Platform,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-
-/* ================= DATA ================= */
-
-const performanceData = [
-  { id: '1', name: 'John Smith', subtitle: 'Sales Rep', icon: 'account-tie' },
-  { id: '2', name: 'Maria Rodriguez', subtitle: '52 Leads This Month', icon: 'account-tie' },
-  { id: '3', name: 'Ahmed Khan', subtitle: 'Sales Rep', icon: 'account-tie' },
-  { id: '4', name: 'Soplia Lee', subtitle: '52 Leads This Month', icon: 'account-tie' },
-  { id: '5', name: 'Sophia Lee', subtitle: 'Sales Rep', icon: 'account-tie' },
-  { id: '6', name: 'David Chen', subtitle: 'Sales Rep', icon: 'account-tie' },
-];
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SERVER_URL } from '../../config';
 
 /* ================= COMPONENT ================= */
 
 const IndividualPerformance = ({ navigation }: any) => {
+  const [performanceData, setPerformanceData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchSalesExecutives();
+  }, []);
+
+  const fetchSalesExecutives = async () => {
+    try {
+      setLoading(true);
+
+      // Get authentication token
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await fetch(`${SERVER_URL}/team-lead/individual-performance-list`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch sales executives');
+      }
+
+      const data = await response.json();
+      const transformed = data.map((item: any) => ({
+        id: item.user_id.toString(),
+        name: item.username,
+        subtitle: item.employee_id || 'Sales Rep',
+        icon: 'account-tie',
+        userId: item.user_id
+      }));
+
+      setPerformanceData(transformed);
+    } catch (error) {
+      console.error('Error fetching sales executives:', error);
+      setPerformanceData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor="#EBF1FF" />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#2563EB" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#EBF1FF" />
-      
+
       {/* 1. TOP NAV BAR */}
       <View style={styles.navBar}>
         <TouchableOpacity style={styles.navButton} onPress={() => navigation.goBack()}>
-            <Icon name="chevron-left" size={30} color="#2563EB" />
+          <Icon name="chevron-left" size={30} color="#2563EB" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.navButton}>
           <Icon name="bell-outline" size={24} color="#2563EB" />
@@ -40,23 +84,18 @@ const IndividualPerformance = ({ navigation }: any) => {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollPadding}>
-        
-        {/* 2. HEADER SECTION */}
         <View style={styles.headerSection}>
           <Text style={styles.mainTitle}>Individual Performance</Text>
         </View>
 
-        {/* 3. SECTION LABEL */}
-        <Text style={styles.sectionLabel}>Leads Completed</Text>
+        <Text style={styles.sectionLabel}>Team Members ({performanceData.length})</Text>
 
-        {/* 4. PERFORMANCE CARDS */}
         {performanceData.map((item) => (
-          <TouchableOpacity 
-            key={item.id} 
-            style={styles.card} 
-            onPress={() => navigation.navigate('IndividualSalesPerformance')}
+          <TouchableOpacity
+            key={item.id}
+            style={styles.card}
+            onPress={() => navigation.navigate('IndividualSalesPerformance', { userId: item.userId })}
           >
-            {/* Replaced Image with Icon Container */}
             <View style={styles.iconAvatarContainer}>
               <Icon name={item.icon} size={28} color="#004aad" />
             </View>
@@ -67,7 +106,7 @@ const IndividualPerformance = ({ navigation }: any) => {
             </View>
 
             <View style={styles.statusCircle}>
-               <Icon name="check-circle" size={20} color="#16a34a" />
+              <Icon name="check-circle" size={20} color="#16a34a" />
             </View>
           </TouchableOpacity>
         ))}

@@ -11,6 +11,7 @@ import {
   StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SERVER_URL } from '../../config';
 
 // --- Theme Colors ---
@@ -44,24 +45,26 @@ const LowPerformerProfiles = () => {
   const fetchLowPerformers = async () => {
     setLoading(true);
     try {
-      // API Fetch Holder
-      const response = await fetch(`${SERVER_URL}/reports/low-performers`);
+      // Get authentication token
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await fetch(`${SERVER_URL}/team-lead/low-performers`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch low performers');
+      }
+
       const result = await response.json();
 
-      // Using dummy data for UI if API is not yet ready
-      setPerformers(result.data || [
-        { id: '1', name: 'Michael Brown', role: 'Sales Executive', icon: 'account-tie' },
-        { id: '2', name: 'Sarah Lee', role: 'Sales Executive', icon: 'account-tie' },
-        { id: '3', name: 'David Wilson', role: 'Sales Executive', icon: 'account-tie' },
-      ]);
-      setStats([
-        { name: 'John Smith', count: 5, color: '#3B82F6' },
-        { name: 'Emily Johnson', count: 4, color: '#93C5FD' },
-        { name: 'Michael Brown', count: 2, color: '#F97316' },
-        { name: 'Sarah Lee', count: 1, color: '#FDBA74' },
-      ]);
+      setPerformers(result);
+      setStats([]); // Stats chart was removed, keeping empty for potential future use
     } catch (error) {
-      console.error(error);
+      console.error('Error fetching low performers:', error);
+      setPerformers([]);
+      setStats([]);
     } finally {
       setLoading(false);
     }
@@ -87,43 +90,29 @@ const LowPerformerProfiles = () => {
       <ScrollView contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
 
         {/* PERFORMER CARDS */}
-        {performers.map((item) => (
-          <View key={item.id} style={styles.profileCard}>
-            <View style={styles.iconAvatarContainer}>
-              <Icon name={item.icon} size={28} color="#004aad" />
-            </View>
-            <View style={styles.info}>
-              <Text style={styles.nameText}>{item.name}</Text>
-              <Text style={styles.roleText}>{item.role}</Text>
-            </View>
-            <View style={styles.badge}>
-              <Icon name="arrow-down-bold" size={14} color={DANGER_RED} />
-              <Text style={styles.badgeText}>Low Performer</Text>
-            </View>
+        {performers.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Icon name="account-check" size={64} color="#94A3B8" />
+            <Text style={styles.emptyText}>No low performers identified</Text>
+            <Text style={styles.emptySubText}>All sales executives are meeting performance targets</Text>
           </View>
-        ))}
-
-        {/* PENDING LEADS CHART CARD */}
-        <View style={styles.chartCard}>
-          <Text style={styles.cardHeading}>Pending Leads</Text>
-          {stats.map((item, index) => (
-            <View key={index} style={styles.barRow}>
-              <View style={[styles.dot, { backgroundColor: item.color }]} />
-              <Text style={styles.barName}>{item.name}</Text>
-              <View style={styles.track}>
-                <View style={[styles.fill, { width: `${(item.count / 6) * 100}%`, backgroundColor: item.color }]} />
+        ) : (
+          performers.map((item) => (
+            <View key={item.id} style={styles.profileCard}>
+              <View style={styles.iconAvatarContainer}>
+                <Icon name={item.icon} size={28} color="#004aad" />
               </View>
-              <Text style={styles.barCount}>{item.count} Leads</Text>
+              <View style={styles.info}>
+                <Text style={styles.nameText}>{item.name}</Text>
+                <Text style={styles.roleText}>{item.role}</Text>
+              </View>
+              <View style={styles.badge}>
+                <Icon name="arrow-down-bold" size={14} color={DANGER_RED} />
+                <Text style={styles.badgeText}>Low Performer</Text>
+              </View>
             </View>
-          ))}
-
-          {/* Chart Axis */}
-          <View style={styles.axis}>
-            {[0, 2, 4, 6].map(val => (
-              <Text key={val} style={styles.axisText}>{val}</Text>
-            ))}
-          </View>
-        </View>
+          ))
+        )}
 
       </ScrollView>
     </View>
@@ -183,6 +172,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#64748B',
+    marginTop: 16,
+  },
+  emptySubText: {
+    fontSize: 14,
+    color: '#94A3B8',
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
 

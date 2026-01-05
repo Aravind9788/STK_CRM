@@ -9,6 +9,9 @@ import {
   StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SERVER_URL } from '../../config';
+import { fetchWithToken } from '../../fetchWithToken';
 
 // --- Theme Configuration ---
 const THEME_COLOR = '#003478'; // Your specific deep blue
@@ -27,37 +30,65 @@ const TeamPerformanceDashboard = () => {
 
   const fetchDashboard = async () => {
     try {
-      // Mocking API data based on your screenshots
-      const dummyData = {
+      setLoading(true);
+
+
+      // Fetch data from multiple endpoints
+      const [pendingLeadsRes, dashboardStatsRes, teamStatsRes] = await Promise.all([
+        fetchWithToken(`${SERVER_URL}/team-lead/pending-leads-overview`),
+        fetchWithToken(`${SERVER_URL}/team-lead/dashboard-stats`),
+        fetchWithToken(`${SERVER_URL}/team-lead/team-stats`)
+      ]);
+
+      if (!pendingLeadsRes.ok || !dashboardStatsRes.ok || !teamStatsRes.ok) {
+        throw new Error('Failed to fetch dashboard data');
+      }
+
+      const pendingLeadsData = await pendingLeadsRes.json();
+      const dashboardStats = await dashboardStatsRes.json();
+      const teamStats = await teamStatsRes.json();
+
+      console.log("teamStats:",teamStats);
+      // Color palette for visual variety
+      const colors = ['#F97316', THEME_COLOR, '#4ADE80', '#8b5cf6'];
+
+      // Transform API data to UI format
+      const transformedData = {
         followUpsPending: {
-          current: 24,
-          total: 54,
-          list: [
-            { name: 'John Smith', leads: 5, color: '#F97316' },
-            { name: 'Emily Johnson', leads: 7, color: THEME_COLOR },
-            { name: 'Michael Brown', leads: 8, color: '#F97316' },
-            { name: 'Sarah Lee', leads: 4, color: '#4ADE80' },
-          ],
+          current: pendingLeadsData.total_pending || 0,
+          total: pendingLeadsData.total_active_leads || 0,
+          list: pendingLeadsData.breakdown?.map((item: any, index: number) => ({
+            name: item.name,
+            leads: item.pending_count,
+            color: colors[index % colors.length]
+          })) || []
         },
         storeDeliveries: {
-          current: 14,
-          total: 28,
-          list: [
-            { name: 'John Smith', sent: 14, total: 28, color: '#4ADE80' },
-            { name: 'Emily Johnson', sent: 4, total: 20, color: THEME_COLOR },
-            { name: 'Michael Brown', sent: 3, total: 20, color: '#4ADE80' },
-            { name: 'Sarah Lee', sent: 3, total: 20, color: '#F97316' },
-          ],
+          current: dashboardStats.deliveries_completed || 0,
+          total: dashboardStats.deliveries_total || 0,
+          list: teamStats.team_members?.map((member: any, index: number) => ({
+            name: member.name,
+            sent: member.deliveries_completed,
+            total: member.deliveries_total_handover,
+            color: colors[index % colors.length]
+          })) || []
         },
         dailyGoal: {
-          completed: 46,
-          target: 80,
-          percentage: 57,
-        },
+          completed: dashboardStats.deliveries_completed || 0,
+          target: dashboardStats.deliveries_total || 1, // Avoid division by zero
+          percentage: dashboardStats.team_goal_percentage || 0
+        }
       };
-      setData(dummyData);
+
+      setData(transformedData);
     } catch (error) {
-      console.log('Error:', error);
+      console.error('Error fetching dashboard:', error);
+      // Set empty data on error to show UI gracefully
+      setData({
+        followUpsPending: { current: 0, total: 0, list: [] },
+        storeDeliveries: { current: 0, total: 0, list: [] },
+        dailyGoal: { completed: 0, target: 1, percentage: 0 }
+      });
     } finally {
       setLoading(false);
     }
@@ -74,7 +105,7 @@ const TeamPerformanceDashboard = () => {
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <StatusBar barStyle="dark-content" />
-      
+
       {/* HEADER */}
       <Text style={styles.title}>Team Performance</Text>
       <Text style={styles.subtitle}>Sales team performance</Text>
@@ -86,9 +117,15 @@ const TeamPerformanceDashboard = () => {
         </View>
         <Text style={styles.summaryText}>Follow-Ups Pending</Text>
         <View style={styles.summaryRight}>
-          <Text style={styles.summaryCount}>24 / 54</Text>
+          <Text style={styles.summaryCount}>
+            {data.followUpsPending.current} / {data.followUpsPending.total}
+          </Text>
           <View style={styles.miniBar}>
-            <View style={[styles.miniFill, { width: '45%' }]} />
+            <View style={[styles.miniFill, {
+              width: `${data.followUpsPending.total > 0
+                ? (data.followUpsPending.current / data.followUpsPending.total) * 100
+                : 0}%`
+            }]} />
           </View>
         </View>
       </View>
@@ -96,9 +133,9 @@ const TeamPerformanceDashboard = () => {
       {/* 2. DETAILED FOLLOW-UPS */}
       <View style={styles.card}>
         <View style={styles.profileRow}>
-            <View style={styles.iconAvatarContainer}>
-              <Icon name='account-tie' size={28} color="#004aad" />
-            </View>
+          <View style={styles.iconAvatarContainer}>
+            <Icon name='account-tie' size={28} color="#004aad" />
+          </View>
           <View>
             <Text style={styles.cardTitle}>Follow-Ups Pending</Text>
             <Text style={styles.cardCountSub}>
@@ -131,7 +168,7 @@ const TeamPerformanceDashboard = () => {
               <View style={styles.fullBarTrack}>
                 <View style={[styles.barFill, { width: `${(item.sent / item.total) * 100}%`, backgroundColor: item.color }]} />
               </View>
-              <Text style={styles.sentValue}>{item.sent === 14 ? '14 - 28' : `${item.sent} Sent`}</Text>
+              <Text style={styles.sentValue}>{item.sent} / {item.total}</Text>
             </View>
           </View>
         ))}
@@ -146,17 +183,33 @@ const TeamPerformanceDashboard = () => {
 
         <View style={styles.dailyGoalContent}>
           <View style={styles.dailyGoalLeft}>
-             <View style={styles.goalRow}><View style={[styles.dot, { backgroundColor: '#F97316' }]} /><Text style={styles.smallText}>John Smith</Text></View>
-             <View style={styles.goalRow}><View style={[styles.dot, { backgroundColor: THEME_COLOR }]} /><Text style={styles.smallText}>Emily Johnson</Text></View>
+            {data.followUpsPending.list.slice(0, 2).map((member: any, index: number) => (
+              <View key={index} style={styles.goalRow}>
+                <View style={[styles.dot, { backgroundColor: member.color }]} />
+                <Text style={styles.smallText}>{member.name}</Text>
+              </View>
+            ))}
           </View>
 
           <View style={styles.donutWrapper}>
-            <View style={styles.donutCircle}>
-              <Text style={styles.donutPercent}>{data.dailyGoal.percentage}%</Text>
+            <View style={[
+              styles.donutCircle,
+              {
+                transform: [{ rotate: `${(data.dailyGoal.percentage * 3.6) - 90}deg` }]
+              }
+            ]}>
+              <Text style={[
+                styles.donutPercent,
+                {
+                  transform: [{ rotate: `${90 - (data.dailyGoal.percentage * 3.6)}deg` }]
+                }
+              ]}>
+                {data.dailyGoal.percentage}%
+              </Text>
             </View>
           </View>
         </View>
-        
+
         <Text style={styles.footerText}>Daily Goal Status {data.dailyGoal.completed} / {data.dailyGoal.target}</Text>
       </View>
     </ScrollView>
@@ -168,10 +221,10 @@ const TeamPerformanceDashboard = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: ACCENT_LIGHT, padding: 20 },
   loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  
+
   title: { fontSize: 26, fontWeight: '800', color: THEME_COLOR, letterSpacing: 0.5 },
   subtitle: { fontSize: 16, color: '#64748B', marginBottom: 25, fontWeight: '500' },
-  
+
   summaryCard: {
     backgroundColor: CARD_BG,
     borderRadius: 18,
@@ -196,7 +249,7 @@ const styles = StyleSheet.create({
   avatar: { width: 55, height: 55, borderRadius: 27.5, marginRight: 15, borderWidth: 2, borderColor: THEME_COLOR },
   cardTitle: { fontSize: 18, fontWeight: '800', color: THEME_COLOR },
   cardCountSub: { color: '#64748B', fontSize: 14, fontWeight: '600' },
-  
+
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   cardCountText: { fontWeight: '800', color: THEME_COLOR, fontSize: 16 },
 
@@ -223,13 +276,12 @@ const styles = StyleSheet.create({
     borderColor: '#DBEAFE', // Base ring color
     borderTopColor: '#F97316', // Orange segment
     borderRightColor: '#F97316', // Matches screenshot arc
-    justifyContent: 'center', alignItems: 'center',
-    transform: [{ rotate: '40deg' }]
+    justifyContent: 'center', alignItems: 'center'
   },
-  donutPercent: { fontSize: 24, fontWeight: '900', color: THEME_COLOR, transform: [{ rotate: '-40deg' }] },
-  
+  donutPercent: { fontSize: 24, fontWeight: '900', color: THEME_COLOR },
+
   footerText: { textAlign: 'center', marginTop: 15, color: '#64748B', fontSize: 14, fontWeight: '700', borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 15 },
-    iconAvatarContainer: {
+  iconAvatarContainer: {
     width: 50,
     height: 50,
     borderRadius: 12,

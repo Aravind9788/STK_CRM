@@ -16,6 +16,8 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SERVER_URL } from '../../config';
+import { fetchWithToken, setNavigationRef } from '../../fetchWithToken';
+import { useNavigation } from '@react-navigation/native';
 
 // --- Types for API Data ---
 interface Category {
@@ -150,20 +152,20 @@ interface FormData {
 
 // --- Types & Data ---
 const INITIAL_DATA: FormData = {
-  createdOn: new Date().toLocaleString(),
-  leadSource: 'Direct Quote',
-  fullName: 'John Doe',
-  phone: '9876543210',
-  location: 'Salem, TN',
-  district: 'Salem',
-  customerProfile: 'Contractor',
+  createdOn: new Date().toISOString(),
+  leadSource: '',
+  fullName: '',
+  phone: '',
+  location: '',
+  district: '',
+  customerProfile: '',
   areaSqft: '',
-  projectType: 'False Ceiling',
-  boardType: 'Gypsum Board',
-  brand: 'SheetRock',
-  channelType: 'Ceiling Section',
-  tataType: 'TATA 40',
-  thickness: '12.5mm',
+  projectType: '',
+  boardType: '',
+  brand: '',
+  channelType: '',
+  tataType: '',
+  thickness: '',
   urgency: 'Not required',
   costDetails: [],
   totalCost: 0,
@@ -217,10 +219,45 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
   const [accessoryVariantOptions, setAccessoryVariantOptions] = useState<AccessoryVariant[]>([]);
   const [customerDetails, setCustomerDetails] = useState<CustomerDetails | null>(null);
   const [customerPhone, setCustomerPhone] = useState('');
-
+  const [timeLogs, setTimeLogs] = useState({
+    leadStart: INITIAL_DATA.createdOn, // Start when screen loads
+    leadEnd: '',
+    approverStart: '',
+    approverEnd: '',
+    quoteStart: '',
+    quoteEnd: ''
+  });
+  const [quotationId, setQuotationId] = useState('');
+  const [quotationDate, setQuotationDate] = useState('');
   // Fetch master data on component mount
   useEffect(() => {
     fetchMasterData();
+  }, []);
+
+  const generateQuotationId = () => {
+    const today = new Date();
+
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+
+    const random = Math.floor(100 + Math.random() * 900); // 3 digit
+
+    return `QT-${yyyy}-${mm}-${dd}-${random}`;
+  };
+
+  const getTodayDate = () => {
+    const today = new Date();
+
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  useEffect(() => {
+    setQuotationId(generateQuotationId());
+    setQuotationDate(getTodayDate());
   }, []);
 
   // Update available options when selections change
@@ -231,7 +268,7 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
       setProjectTypeOptions(projectTypes);
 
       // Set initial category based on default project type
-      const defaultCategory = masterData.categories.find(cat => cat.name === formData.projectType);
+      const defaultCategory = masterData.categories.find(cat => cat.name);
       setSelectedCategory(defaultCategory || null);
 
       if (defaultCategory) {
@@ -241,7 +278,7 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
 
         // Set initial sub-category based on default board type
         const defaultSubCategory = defaultCategory.sub_categories.find(
-          sub => sub.name === formData.boardType
+          sub => sub.name
         );
         setSelectedSubCategory(defaultSubCategory || null);
 
@@ -268,7 +305,7 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
   // Update channel variants when channel type is selected
   useEffect(() => {
     if (selectedSubCategory && formData.channelType) {
-      const channel = selectedSubCategory.channel.find(ch => ch.name === formData.channelType);
+      const channel = selectedSubCategory.channel.find(ch => ch.name);
       setSelectedChannelType(channel || null);
       if (channel) {
         const tataTypes = channel.variants.map(
@@ -277,7 +314,7 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
         setChannelVariantOptions(channel.variants);
 
         if (!formData.tataType && tataTypes.length > 0) {
-          updateField('tataType', tataTypes[0]);
+          setFormData(prev => ({ ...prev, tataType: tataTypes[0] }));
         }
 
         if (channel.variants.length > 0) {
@@ -290,7 +327,7 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
   // Update grid variants when grid type is selected
   useEffect(() => {
     if (selectedSubCategory && formData.boardType) {
-      const grid = selectedSubCategory.gridtype.find(gt => gt.name === formData.boardType);
+      const grid = selectedSubCategory.gridtype.find(gt => gt.name);
       setSelectedGridType(grid || null);
       if (grid) {
         setGridVariantOptions(grid.variants);
@@ -319,6 +356,17 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
 
       setCustomerDetails(result.customer_details);
 
+      // Populate formData with customer details
+      setFormData(prev => ({
+        ...prev,
+        fullName: result.customer_details.name,
+        phone: customerPhone,
+        location: result.customer_details.location,
+        district: result.customer_details.district,
+        customerProfile: result.customer_details.profile,
+        leadSource: result.customer_details.source,
+      }));
+
     } catch (error) {
       console.log(error);
       Alert.alert('Error', 'Unable to fetch customer');
@@ -332,162 +380,139 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
   const fetchMasterData = async () => {
     setIsLoadingMasterData(true);
     try {
-      const response = await fetch(`${SERVER_URL}/master-data`);
+      const response = await fetchWithToken(`${SERVER_URL}/master-data`);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch master data: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log(data);
       setMasterData(data);
       setIsMasterDataLoaded(true);
 
     } catch (error) {
       console.error('Error fetching master data:', error);
       Alert.alert(
-        'Error',
-        'Failed to load master data. Please check your connection and try again.'
+        'Connection Error',
+        'Unable to load product data from server. Please check your internet connection and restart the app.',
+        [{ text: 'OK' }]
       );
-      // Set default data if API fails
-      setDefaultMasterData();
+      // Don't set default data - require backend connection for accurate data
     } finally {
       setIsLoadingMasterData(false);
     }
   };
 
+  // Set navigation ref in use Effect
+  useEffect(() => {
+    setNavigationRef(navigation);
+  }, [navigation]);
+
   const sendToCustomer = async () => {
     try {
       setLoading(true);
+
+      if (!customerId) {
+        Alert.alert('Error', 'No lead ID found. Please generate quotation first.');
+        return;
+      }
+
+      // Prepare payload matching SendQuotationToCustomerRequest schema
+      const payload = {
+        lead_id: customerId, // Using stored lead_code
+        method: 'WhatsApp',
+        sent_at: new Date().toISOString()
+      };
+
+      console.log('Sending to customer:', payload);
 
       const response = await fetch(
         `${SERVER_URL}/quotations/send-customer`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            method: 'WhatsApp',
-            quote_id: 'TEMP-Q-101',      // or dynamic later
-            phone: customerPhone,
-          }),
+          body: JSON.stringify(payload),
         }
       );
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Send Customer API Error:', errorData);
+        throw new Error(errorData?.detail || 'Failed to send quotation to customer');
+      }
+
       const result = await response.json();
+      console.log('Send customer response:', result);
 
-      Alert.alert('Success', result.message);
+      Alert.alert('Success', result.message || 'Quotation sent to customer successfully!');
 
-    } catch (error) {
-      console.log(error);
-      Alert.alert('Error', 'Failed to send quotation to customer');
+    } catch (error: any) {
+      console.error('Send to Customer Error:', error);
+      Alert.alert('Error', error.message || 'Failed to send quotation to customer');
     } finally {
       setLoading(false);
     }
   };
+
 
   const sendToApprover = async () => {
     try {
       setLoading(true);
+      const lead_end = new Date().toISOString();
+      const quote_end = new Date().toISOString();
+      const approve_request_at = new Date().toISOString();
+
+      setTimeLogs(prev => ({
+        ...prev,
+        leadEnd: lead_end,
+        quoteEnd: quote_end,
+        approverStart: approve_request_at
+      }));
+      // First, generate the quotation to get lead_code and quotation_id
+      const quotationResult = await generateQuotation();
+
+      if (!quotationResult || !quotationResult.lead_code || !quotationResult.qoutaion_id) {
+        throw new Error('Failed to generate quotation or missing required IDs');
+      }
+
+      // Prepare approval payload matching SubmitQuotationApprovalToTeamLead schema
+      const approvalPayload = {
+        lead_id: quotationResult.lead_code,
+        quotation_id: quotationResult.qoutaion_id,
+        sent_at: new Date().toISOString()
+      };
+
+      console.log('Submitting for approval:', approvalPayload);
 
       const response = await fetch(
-        `${SERVER_URL}/quotations/submit-approval`,
+        `${SERVER_URL}/quotations/submit-quotation-approval`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            quote_id: 'TEMP-Q-101',    // or actual quote id
-            requested_by: 'SE-001',
-          }),
+          body: JSON.stringify(approvalPayload),
         }
       );
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Approval API Error:', errorData);
+        throw new Error(errorData?.detail || 'Failed to submit for approval');
+      }
+
       const result = await response.json();
+      console.log('Approval response:', result);
 
-      Alert.alert('Submitted', result.message);
+      Alert.alert('Success', result.message || 'Quotation sent to approver for review!');
 
-    } catch (error) {
-      console.log(error);
-      Alert.alert('Error', 'Failed to send for approval');
+    } catch (error: any) {
+      console.error('Send to Approver Error:', error);
+      Alert.alert('Error', error.message || 'Failed to send for approval');
     } finally {
       setLoading(false);
     }
   };
 
-  const setDefaultMasterData = () => {
-    // Set default master data structure
-    const defaultData: MasterData = {
-      categories: [
-        {
-          name: 'False Ceiling',
-          sub_categories: [
-            {
-              name: 'Gypsum Board',
-              Suggested_product: [
-                { name: 'Standard Board', price: '410', price_bar: '410-390' },
-                { name: 'MR Board', price: '430', price_bar: '430-410' },
-                { name: 'Heatbloc Board', price: '520', price_bar: '520-500' },
-                { name: 'FR Board', price: '560', price_bar: '560-540' }
-              ],
-              channel: [
-                {
-                  name: 'Ceiling Section',
-                  variants: [
-                    { brand: 'Tata', variant: '0.30', price_bar: '115-110' },
-                    { brand: 'Gyproc', variant: '0.30', price_bar: '120-115' }
-                  ]
-                }
-              ],
-              accessories: [
-                {
-                  name: 'Main Tee',
-                  variants: [
-                    { brand: 'Tata', variant: 'T24', price_bar: '140-130' },
-                    { brand: 'Gyproc', variant: 'T24', price_bar: '145-135' }
-                  ]
-                }
-              ],
-              gridtype: [
-                {
-                  name: 'T24 Grid',
-                  variants: [
-                    { brand: 'Gyproc', variant: 'T24', price_bar: '180-170' }
-                  ]
-                }
-              ]
-            }
-          ]
-        },
-        {
-          name: 'Drywall Partition',
-          sub_categories: [
-            {
-              name: 'Drywall',
-              Suggested_product: [
-                { name: 'Standard Board', price: '410', price_bar: '410-390' }
-              ],
-              channel: [],
-              accessories: [],
-              gridtype: []
-            }
-          ]
-        }
-      ],
-      sources: ['Direct Quote', 'Indiamart', 'Walk-In', 'Google', 'JustDial', 'Site Visit'],
-      districts: ['Salem', 'Palakkad', 'Malappuram', 'Coimbatore', 'Thrissur'],
-      materials: [
-        { id: 1, name: 'Standard Board', brand: 'Standard', price: 410, unit: 'per sheet' },
-        { id: 2, name: 'MR Board', brand: 'Standard', price: 430, unit: 'per sheet' },
-        { id: 3, name: 'Heatbloc Board', brand: 'Standard', price: 520, unit: 'per sheet' },
-        { id: 4, name: 'FR Board', brand: 'Standard', price: 560, unit: 'per sheet' }
-      ],
-      accessories: [
-        { id: 1, name: 'Ceiling Section (0.30)', price: 115, unit: 'per piece' },
-        { id: 2, name: 'Main Tee (T24)', price: 140, unit: 'per piece' }
-      ]
-    };
-
-    setMasterData(defaultData);
-    setIsMasterDataLoaded(true);
-  };
 
   const updateField = (key: keyof FormData | string, value: any) => {
     setFormData((prev) => ({ ...prev, [key]: value } as FormData));
@@ -1423,6 +1448,58 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
     </View>
   );
 
+  const calculateDuration = (start?: string, end?: string) => {
+    if (!start || !end) return null;
+
+    const startTime = new Date(start).getTime();
+    const endTime = new Date(end).getTime();
+
+    if (endTime <= startTime) return null;
+
+    const diffMs = endTime - startTime;
+
+    const totalSeconds = Math.floor(diffMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    return `${hours}h ${minutes}m ${seconds}s`;
+  };
+
+  const formatTime = (isoString?: string, preview?: boolean) => {
+    if (!isoString) return null;
+    if (!preview) return false;
+
+    const date = new Date(isoString);
+
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+
+    let hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12; // convert 0 → 12
+    const formattedHours = String(hours).padStart(2, '0');
+    if (preview) {
+      return `${formattedHours}:${minutes}:${seconds} ${ampm}`;
+    }
+    else { return `${day}-${month}-${year} ${formattedHours}:${minutes}:${seconds} ${ampm}` }
+  };
+
+  const qoutationStartTime = async () => {
+    const quoteStart = new Date().toISOString();
+    setTimeLogs(prev => ({
+      ...prev,
+      quoteStart: quoteStart
+    }));
+
+    // Actually generate the quotation (calls API)
+    await generateQuotation();
+  }
+
   const generateQuotation = async () => {
     if (!customerDetails) {
       Alert.alert('Error', 'Please find customer before generating quotation');
@@ -1432,37 +1509,58 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
     try {
       setLoading(true);
 
+      // Prepare payload matching LeadCreateSchema
       const payload = {
-        timestamp: new Date().toISOString(),
+        lead_created_at: new Date().toISOString(),
         source: customerDetails.source,
         customer_name: customerDetails.name,
         phone: customerPhone,
         location: customerDetails.location,
         district: customerDetails.district,
         profile: customerDetails.profile,
-        process_type: formData.projectType,
         area_sqft: Number(formData.areaSqft) || null,
-        category_interest: formData.boardType,
-        brand_preference: formData.brand,
-        urgency: formData.urgency,
-        follow_up_date: new Date().toISOString(),
-        sales_executive_id: "SE-001",
+        project_type: formData.projectType,
+        board_type: formData.boardType,
+        material_brand: formData.brand,
+        channel: formData.channelType,
+        channel_thickness: formData.tataType,
+        material_category: isMaterialMode ? formData.boardType : null,
+        material_quantity: isMaterialMode ? Number(materialQty) : null,
+        accessory_name: isMaterialMode ? selectedAccessory : null,
+        accessory_qty: isMaterialMode ? Number(accessoryQty) : null,
+        urgency: formData.urgency || "Normal",
+        quotation_created_at: new Date().toISOString(),
+        quotation_id: quotationId,
+        total_estimated_cost: formData.totalCost ? Number(formData.totalCost) : null,
       };
 
-      const response = await fetch(`${SERVER_URL}/leads`, {
+      console.log('Creating lead with payload:', payload);
+
+      const response = await fetchWithToken(`${SERVER_URL}/leads/create-lead`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create lead');
+        const errorData = await response.json();
+        console.error('API Error:', errorData);
+        throw new Error(errorData?.detail || 'Failed to create lead');
       }
 
-      setCurrentStep(6);
+      const result = await response.json();
+      console.log('Lead created successfully:', result);
 
-    } catch (error) {
-      Alert.alert('Error', 'Unable to generate quotation');
+      // Store lead_code and quotation_id for later use
+      setCustomerId(result.lead_code);
+
+      Alert.alert('Success', 'Quotation generated successfully!');
+      setCurrentStep(6);
+      return result;
+
+    } catch (error: any) {
+      console.error('Generate Quotation Error:', error);
+      Alert.alert('Error', error.message || 'Unable to generate quotation');
     } finally {
       setLoading(false);
     }
@@ -1539,7 +1637,7 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
       <View style={styles.buttonSpacingSmall} />
       <TouchableOpacity
         style={styles.primaryBtn}
-        onPress={generateQuotation}>
+        onPress={qoutationStartTime}>
         {loading ? (
           <ActivityIndicator color="#fff" />
         ) : (
@@ -1561,40 +1659,58 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
           <View style={styles.previewHeaderContent}>
             <Text style={styles.companyName}>STK Associates</Text>
             <View style={styles.quoteInfo}>
-              <Text style={styles.quoteId}>QT-2024-001</Text>
+              <Text style={styles.quoteId}>
+                Quotation #: {quotationId}
+              </Text>
               <Text style={styles.quoteDate}>
-                Date: {new Date().toISOString().split('T')[0]}
+                Date: {quotationDate}
               </Text>
             </View>
+
           </View>
         </View>
 
         <View style={styles.previewSection}>
-          <Text style={styles.previewLabel}>CLIENT</Text>
-          <Text style={styles.previewValue}>{formData.fullName}</Text>
-          <Text style={styles.previewSubValue}>
-            ID: {customerId || 'N/A'}
+          <Text style={styles.previewLabel}>CUSTOMER DETAILS</Text>
+          <Text style={styles.previewValue}>
+            Name: {customerDetails?.name || formData.fullName || 'N/A'}
           </Text>
-          <Text style={styles.previewSubValue}>{formData.location}</Text>
+          <Text style={styles.previewSubValue}>
+            Phone: {customerPhone || formData.phone || 'N/A'}
+          </Text>
+          <Text style={styles.previewSubValue}>
+            Location: {customerDetails?.location || formData.location || 'N/A'}, {customerDetails?.district || formData.district || 'N/A'}
+          </Text>
         </View>
 
+        {/* --- CONDITIONAL PREVIEW --- */}
         {!isMaterialMode ? (
+          // STANDARD MODE
           <View style={styles.previewSection}>
-            <Text style={styles.previewLabel}>PROJECT</Text>
-            <Text style={styles.previewValue}>{formData.projectType}</Text>
-            <Text style={styles.previewSubValue}>
-              {formData.areaSqft} Sq.ft • {formData.boardType}
+            <Text style={styles.previewLabel}>PROJECT DETAILS</Text>
+            <Text style={styles.previewValue}>
+              Project Type: {formData.projectType}
             </Text>
-            {selectedSuggestedProduct && (
-              <Text style={styles.previewSubValue}>
-                Brand: {formData.brand} (₹{selectedSuggestedProduct.price}/sheet)
-              </Text>
-            )}
+            <Text style={styles.previewSubValue}>
+              Area: {formData.areaSqft || 'Not specified'} Sqft
+            </Text>
+            <Text style={styles.previewSubValue}>
+              Material: {formData.boardType}, {formData.channelType}
+            </Text>
+            <Text style={styles.previewSubValue}>
+              Brand: {formData.brand}
+            </Text>
           </View>
         ) : (
+          // MATERIAL MODE PREVIEW
           <View style={styles.previewSection}>
             <Text style={styles.previewLabel}>DIRECT ORDER</Text>
-            <Text style={styles.previewValue}>Brand: {formData.brand}</Text>
+            <Text style={styles.previewValue}>
+              Material: {formData.boardType}
+            </Text>
+            <Text style={styles.previewSubValue}>
+              Brand: {formData.brand}
+            </Text>
             {materialList.length > 0 && (
               <View style={styles.accessoryPreviewSection}>
                 <Text style={[styles.previewLabel, styles.accessoryPreviewLabel]}>
@@ -1602,7 +1718,7 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
                 </Text>
                 {materialList.map((mat, i) => (
                   <Text key={i} style={styles.previewSubValue}>
-                    • {mat.name} ({mat.qty} pcs) - ₹{mat.total}
+                    • {mat.name} ({mat.qty} {mat.unit}) - ₹{mat.total}
                   </Text>
                 ))}
               </View>
@@ -1614,7 +1730,7 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
                 </Text>
                 {accessoriesList.map((acc, i) => (
                   <Text key={i} style={styles.previewSubValue}>
-                    • {acc.name} ({acc.qty} pcs) - ₹{acc.total}
+                    • {acc.name} ({acc.qty} {acc.unit}) - ₹{acc.total}
                   </Text>
                 ))}
               </View>
@@ -1622,15 +1738,79 @@ const QuoteBuilderScreen = ({ navigation }: { navigation: any }) => {
           </View>
         )}
 
+        <View style={styles.previewSection}>
+          <Text style={styles.previewLabel}>COST SUMMARY</Text>
+          {formData.costDetails.map((item, idx) => (
+            <Text key={idx} style={styles.previewSubValue}>
+              {item.item}: ₹{item.total.toLocaleString()}
+            </Text>
+          ))}
+        </View>
+
         <View style={styles.finalTotalRow}>
           <View>
             <Text style={styles.finalTotalLabel}>Total Amount</Text>
             <Text style={styles.finalTotalSubLabel}>(Incl. 15% GST)</Text>
           </View>
           <Text style={styles.finalTotalValue}>
-            ₹{formData.totalCost.toLocaleString()}
+            ₹{(formData.totalCost || 0).toLocaleString()}
           </Text>
         </View>
+      </View>
+      <View style={styles.timestampCard}>
+
+        {/* ===== Lead Timestamp ===== */}
+        <Text style={styles.timestampHeader}>Lead Timestamp</Text>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timestampLabel}>Started At:</Text>
+          <Text style={styles.timestampValue}>
+            {formatTime(timeLogs.leadStart, true) || '--'}
+          </Text>
+        </View>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timestampLabel}>Ended At:</Text>
+          <Text style={styles.timestampValue}>
+            {formatTime(timeLogs.leadEnd, true) || 'Click Send to Approver'}
+          </Text>
+        </View>
+
+        <Text style={styles.timestampHeader}>Time Taken</Text>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timeTakenValue}>
+            {calculateDuration(timeLogs.leadStart, timeLogs.leadEnd) || '--'}
+          </Text>
+        </View>
+
+        {/* ===== Quotation Timestamp ===== */}
+        <Text style={[styles.timestampHeader, { marginTop: 16 }]}>
+          Quotation Timestamp
+        </Text>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timestampLabel}>Started At:</Text>
+          <Text style={styles.timestampValue}>
+            {formatTime(timeLogs.quoteStart, true) || '--'}
+          </Text>
+        </View>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timestampLabel}>Ended At:</Text>
+          <Text style={styles.timestampValue}>
+            {formatTime(timeLogs.quoteEnd, true) || 'Click Send to Approver'}
+          </Text>
+        </View>
+
+        <Text style={styles.timestampHeader}>Time Taken</Text>
+
+        <View style={styles.timestampRow}>
+          <Text style={styles.timeTakenValue}>
+            {calculateDuration(timeLogs.quoteStart, timeLogs.quoteEnd) || '--'}
+          </Text>
+        </View>
+
       </View>
 
       <TouchableOpacity style={styles.primaryBtn} onPress={() => { }}>
@@ -2817,7 +2997,55 @@ const styles = StyleSheet.create({
     color: '#555',
     marginLeft: 8,
   },
+  timestampCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e6f0ff',
+    marginBottom: 16,
 
+    // Android elevation
+    elevation: 4,
+
+    // iOS shadow
+    shadowColor: '#002d69',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+  },
+
+
+  timestampHeader: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#002d69',
+    marginBottom: 10,
+  },
+
+  timestampRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+
+  timestampLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#555',
+    width: 90, // keeps alignment clean
+  },
+
+  timestampValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#004aad',
+  },
+  timeTakenValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#e0ae07ff',
+  },
 });
 
 export default QuoteBuilderScreen;

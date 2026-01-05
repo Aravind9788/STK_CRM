@@ -7,35 +7,93 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Dimensions,
-  StatusBar
+  StatusBar,
+  ActivityIndicator
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SERVER_URL } from '../../config';
 
 const { width } = Dimensions.get('window');
 
 // --- Theme Colors ---
-const THEME_BLUE = '#003478'; 
+const THEME_BLUE = '#003478';
 const BG_COLOR = '#F5F9FF';
 const CARD_WHITE = '#FFFFFF';
 
-const PendingLeadsOverview = () => {
-  const [loading, setLoading] = useState(false);
+const PendingLeadsOverview = ({ navigation }: any) => {
+  const [loading, setLoading] = useState(true);
+  const [leadData, setLeadData] = useState<any[]>([]);
+  const [totalPending, setTotalPending] = useState(0);
+  const [totalActive, setTotalActive] = useState(0);
 
-  // Dummy Data matching the uploaded design
-  const leadData = [
-    { name: 'John Smith', leads: 5, percent: 42, color: '#F97316' },
-    { name: 'Emily Johnson', leads: 4, percent: 33, color: '#4ADE80' },
-    { name: 'Michael Brown', leads: 2, percent: 17, color: '#60A5FA' },
-    { name: 'Sarah Lee', leads: 1, percent: 8, color: '#86EFAC' },
-  ];
+  useEffect(() => {
+    fetchPendingLeads();
+  }, []);
+
+  const fetchPendingLeads = async () => {
+    try {
+      setLoading(true);
+
+      // Get authentication token
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await fetch(`${SERVER_URL}/team-lead/pending-leads-overview`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch pending leads');
+      }
+
+      const data = await response.json();
+
+      // Transform API data to UI format
+      const colors = ['#F97316', '#4ADE80', '#60A5FA', '#86EFAC'];
+      const transformed = data.breakdown?.map((item: any, index: number) => ({
+        name: item.name,
+        leads: item.pending_count,
+        percent: item.percentage,
+        color: colors[index % colors.length]
+      })) || [];
+
+      setLeadData(transformed);
+      setTotalPending(data.total_pending || 0);
+      setTotalActive(data.total_active_leads || 0);
+
+    } catch (error) {
+      console.error('Error fetching pending leads:', error);
+      setLeadData([]);
+      setTotalPending(0);
+      setTotalActive(0);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="dark-content" backgroundColor={BG_COLOR} />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={THEME_BLUE} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const maxLeads = Math.max(...leadData.map(d => d.leads), 1);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={BG_COLOR} />
-      
+
       {/* Header Navigation */}
       <View style={styles.navHeader}>
-        <TouchableOpacity><Icon name="chevron-left" size={30} color={THEME_BLUE} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Icon name="chevron-left" size={30} color={THEME_BLUE} />
+        </TouchableOpacity>
         <TouchableOpacity><Icon name="bell" size={26} color={THEME_BLUE} /></TouchableOpacity>
       </View>
 
@@ -50,9 +108,14 @@ const PendingLeadsOverview = () => {
           </View>
           <Text style={styles.cardLabel}>Follow-Ups Pending</Text>
           <View style={styles.summaryRight}>
-            <Text style={styles.countText}>12 / <Text style={{color: '#000'}}>18</Text></Text>
+            <Text style={styles.countText}>
+              {totalPending} / <Text style={{ color: '#000' }}>{totalActive}</Text>
+            </Text>
             <View style={styles.miniTrack}>
-               <View style={[styles.miniFill, { width: '66%' }]} />
+              <View style={[
+                styles.miniFill,
+                { width: `${totalActive > 0 ? (totalPending / totalActive) * 100 : 0}%` }
+              ]} />
             </View>
           </View>
         </View>
@@ -63,13 +126,65 @@ const PendingLeadsOverview = () => {
           <View style={styles.donutRow}>
             {/* Custom Donut View */}
             <View style={styles.donutContainer}>
-               <View style={[styles.donutSegment, { borderTopColor: '#F97316', borderRightColor: '#F97316', transform: [{rotate: '0deg'}] }]} />
-               <View style={[styles.donutSegment, { borderTopColor: '#4ADE80', transform: [{rotate: '110deg'}] }]} />
-               <View style={[styles.donutSegment, { borderTopColor: '#60A5FA', transform: [{rotate: '220deg'}] }]} />
-               <View style={styles.donutInner}>
-                  <Text style={styles.donutBigNum}>12</Text>
-                  <Text style={styles.donutSubText}>Pending Leads</Text>
-               </View>
+              {/* Dynamically generate segments based on leadData */}
+              {leadData.map((item, index) => {
+                // Calculate cumulative rotation for each segment
+                let cumulativePercent = 0;
+                for (let i = 0; i < index; i++) {
+                  cumulativePercent += leadData[i].percent;
+                }
+                const startDegree = (cumulativePercent / 100) * 360;
+                const segmentPercent = item.percent;
+
+                // For segments > 50%, we need to render two half-circles
+                if (segmentPercent > 50) {
+                  return (
+                    <React.Fragment key={index}>
+                      {/* First half (50%) */}
+                      <View
+                        style={[
+                          styles.donutSegment,
+                          {
+                            borderTopColor: item.color,
+                            borderRightColor: item.color,
+                            transform: [{ rotate: `${startDegree}deg` }]
+                          }
+                        ]}
+                      />
+                      {/* Second half (remaining %) */}
+                      <View
+                        style={[
+                          styles.donutSegment,
+                          {
+                            borderTopColor: item.color,
+                            borderRightColor: segmentPercent > 75 ? item.color : 'transparent',
+                            transform: [{ rotate: `${startDegree + 180}deg` }]
+                          }
+                        ]}
+                      />
+                    </React.Fragment>
+                  );
+                }
+
+                // For segments <= 50%, single half-circle is enough
+                return (
+                  <View
+                    key={index}
+                    style={[
+                      styles.donutSegment,
+                      {
+                        borderTopColor: item.color,
+                        borderRightColor: segmentPercent > 25 ? item.color : 'transparent',
+                        transform: [{ rotate: `${startDegree}deg` }]
+                      }
+                    ]}
+                  />
+                );
+              })}
+              <View style={styles.donutInner}>
+                <Text style={styles.donutBigNum}>{totalPending}</Text>
+                <Text style={styles.donutSubText}>Pending Leads</Text>
+              </View>
             </View>
 
             {/* Legend List */}
@@ -92,21 +207,27 @@ const PendingLeadsOverview = () => {
           <Text style={styles.cardHeading}>Pending Leads</Text>
           {leadData.map((item, idx) => (
             <View key={idx} style={styles.barRow}>
-              <View style={[styles.dot, { backgroundColor: '#60A5FA' }]} />
+              <View style={[styles.dot, { backgroundColor: item.color }]} />
               <Text style={styles.barName}>{item.name}</Text>
               <View style={styles.barTrack}>
-                <View style={[styles.barFill, { width: `${(item.leads / 6) * 100}%`, backgroundColor: '#60A5FA' }]} />
+                <View style={[
+                  styles.barFill,
+                  {
+                    width: `${(item.leads / maxLeads) * 100}%`,
+                    backgroundColor: item.color
+                  }
+                ]} />
               </View>
               <Text style={styles.barVal}>{item.leads} Leads</Text>
             </View>
           ))}
-          
+
           {/* Chart Axis Labels */}
           <View style={styles.axisLabels}>
-             <Text style={styles.axisText}>0</Text>
-             <Text style={styles.axisText}>2</Text>
-             <Text style={styles.axisText}>4</Text>
-             <Text style={styles.axisText}>6</Text>
+            <Text style={styles.axisText}>0</Text>
+            <Text style={styles.axisText}>{Math.round(maxLeads / 3)}</Text>
+            <Text style={styles.axisText}>{Math.round(maxLeads * 2 / 3)}</Text>
+            <Text style={styles.axisText}>{maxLeads}</Text>
           </View>
         </View>
 

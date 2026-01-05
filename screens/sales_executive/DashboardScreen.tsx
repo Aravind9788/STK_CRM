@@ -15,6 +15,7 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SERVER_URL } from '../../config';
 import { useNavigation } from '@react-navigation/native';
+import { fetchWithToken, setNavigationRef } from '../../fetchWithToken';
 
 // --- Types ---
 interface DashboardData {
@@ -70,52 +71,53 @@ const DashboardScreen = ({ route }: any) => {
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
+    setNavigationRef(navigation);
     fetchDashboardData();
   }, []);
 
   const fetchDashboardData = async () => {
-  setLoading(true);
+    setLoading(true);
 
-  try {
-    console.log(' Dashboard API called');
+    try {
+      console.log(' Dashboard API called');
 
-    const response = await fetch(`${SERVER_URL}/dashboard/metrics`);
-    const result = await response.json();
+      const response = await fetchWithToken(`${SERVER_URL}/dashboard/metrics`);
+      const result = await response.json();
 
-    console.log(' Dashboard API response:', result);
+      console.log(' Dashboard API response:', result);
 
-    const transformedData: DashboardData = {
-      userName: sales_person_id || 'User',
-      monthlyGoal: {
-        current: result.daily_achieved_amount,
-        target: result.monthly_goal_amount,
-        percentage: Math.round(
-          (result.daily_achieved_amount / result.monthly_goal_amount) * 100
-        ),
-      },
-      dailyGoal: {
-        current: result.daily_achieved_amount,
-        target: result.daily_goal_amount,
-        percentage: Math.round(
-          (result.daily_achieved_amount / result.daily_goal_amount) * 100
-        ),
-      },
-      totalCommission: 0,
-      todaysActivity: {
-        onlineTime: '0h',
-        leadsContacted: 0,
-        commissionEarned: 0,
-      },
-    };
+      const transformedData: DashboardData = {
+        userName: sales_person_id || 'User',
+        monthlyGoal: {
+          current: result.daily_achieved_amount,
+          target: result.monthly_goal_amount,
+          percentage: Math.round(
+            (result.daily_achieved_amount / result.monthly_goal_amount) * 100
+          ),
+        },
+        dailyGoal: {
+          current: result.daily_achieved_amount,
+          target: result.daily_goal_amount,
+          percentage: Math.round(
+            (result.daily_achieved_amount / result.daily_goal_amount) * 100
+          ),
+        },
+        totalCommission: 0,
+        todaysActivity: {
+          onlineTime: '0h',
+          leadsContacted: 0,
+          commissionEarned: 0,
+        },
+      };
 
-    setData(transformedData);
-  } catch (error) {
-    console.error('Error fetching dashboard data:', error);
-  } finally {
-    setLoading(false);
-    setRefreshing(false);
-  }
-};
+      setData(transformedData);
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
 
 
@@ -270,6 +272,13 @@ const DashboardScreen = ({ route }: any) => {
             isLast
           />
         </View>
+        <TouchableOpacity
+          style={styles.leaveButton}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('TakeLeaveScreen')}
+        >
+          <Text style={styles.leaveButtonText}>Take Leave</Text>
+        </TouchableOpacity>
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -314,6 +323,24 @@ const styles = StyleSheet.create({
         paddingTop: StatusBar.currentHeight || 0,
       },
     }),
+  },
+
+  // ... existing styles ...
+
+  leaveButton: {
+    backgroundColor: '#ffffff',
+    marginTop: 20,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0', // Subtle light grey border
+    elevation: 1, // Tiny shadow for depth
+  },
+  leaveButtonText: {
+    color: '#000000', // Black text
+    fontSize: 16,
+    fontWeight: '600',
   },
   container: { padding: 20 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: BG_COLOR },

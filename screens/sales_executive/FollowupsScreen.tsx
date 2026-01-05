@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SERVER_URL } from '../../config';
+import { fetchWithToken, setNavigationRef } from '../../fetchWithToken';
 
 // --- Dummy Data matching your image ---
 const FOLLOWUP_DATA = [
@@ -77,39 +78,49 @@ const FollowupsScreen = ({ navigation }: any) => {
   const [activeTab, setActiveTab] = useState('Today');
   const [followups, setFollowups] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  
+
 
   const fetchFollowups = async () => {
     try {
       setLoading(true);
 
-      const response = await fetch(`${SERVER_URL}/leads/follow-up-leads`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          // Authorization: `Bearer ${token}`  // if JWT enabled
-        },
-      });
+      const tabMap: Record<string, string> = {
+        Today: 'today',
+        Upcoming: 'upcoming',
+        Delivered: 'delivered',
+      };
+
+      const response = await fetchWithToken(
+        `${SERVER_URL}/leads/follow-up-leads?tab=${tabMap[activeTab]}`
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch follow-ups');
+      }
 
       const data = await response.json();
+      // Ensure data is an array, fallback to empty array if not
+      setFollowups(Array.isArray(data) ? data : []);
 
-      setFollowups(data);
     } catch (error) {
       console.log(error);
       Alert.alert('Error', 'Unable to load follow-ups');
+      setFollowups([]); // Set to empty array on error
     } finally {
       setLoading(false);
     }
   };
 
 
+
   useEffect(() => {
     fetchFollowups();
-  }, []);
+  }, [activeTab]);
+
 
   const updateFollowup = async (leadId: string) => {
     try {
-      const response = await fetch(
+      const response = await fetchWithToken(
         `${SERVER_URL}/leads/follow-up-lead-update`,
         {
           method: 'POST',
@@ -118,11 +129,15 @@ const FollowupsScreen = ({ navigation }: any) => {
             lead_id: leadId,
             status_update: 'Followed Up',
             next_followup_date: new Date(
-              Date.now() + 3 * 24 * 60 * 60 * 1000
+              Date.now() + 7 * 24 * 60 * 60 * 1000
             ).toISOString(),
           }),
         }
       );
+
+      if (!response.ok) {
+        throw new Error('Failed to update follow-up');
+      }
 
       const result = await response.json();
       Alert.alert('Success', result.message);
@@ -141,7 +156,7 @@ const FollowupsScreen = ({ navigation }: any) => {
       activeOpacity={0.8}
       onPress={() =>
         navigation.navigate('QuotationDetails', {
-          leadId: item.id,
+          leadId: item.lead_code,
           customerName: item.name,
           status: item.statusBadge,
           estimatedValue: item.note,
@@ -175,7 +190,11 @@ const FollowupsScreen = ({ navigation }: any) => {
         </View>
       </View >
 
-      {/* Badges (Optional) */}
+      {/* Content Note */}
+      <Text style={styles.noteText} numberOfLines={2}>
+        {item.lead_code}
+      </Text>
+      {/* Badges*/}
       {
         item.statusBadge && (
           <View
@@ -184,16 +203,13 @@ const FollowupsScreen = ({ navigation }: any) => {
               { backgroundColor: item.statusColor + '20' },
             ]}>
             <Text style={[styles.badgeText, { color: item.statusColor }]}>
-              {item.statusBadge}
+              {item.note}
             </Text>
           </View>
         )
       }
 
-      {/* Content Note */}
-      <Text style={styles.noteText} numberOfLines={2}>
-        {item.note}
-      </Text>
+
 
       {/* Action Footer */}
       <View style={styles.cardFooter}>
@@ -213,15 +229,16 @@ const FollowupsScreen = ({ navigation }: any) => {
             size={16}
             color="#004aad"
           />
-          <Text style={styles.footerLabel}>View details</Text>
+          <Text style={styles.footerLabel}>View Details</Text>
         </View>
         <Icon name="chevron-right" size={16} color="#cccccc" />
       </View>
-    </TouchableOpacity >
+    </TouchableOpacity>
   );
   // Filter data based on active tab
   const mappedData = followups.map((l) => ({
     id: l.lead_id,
+    lead_code: l.lead_code,
     name: l.customer_name,
     note: l.last_action,
     date: new Date(l.next_followup).toDateString().slice(4, 10),
@@ -285,7 +302,7 @@ const FollowupsScreen = ({ navigation }: any) => {
 
       {/* --- Tabs --- */}
       <View style={styles.tabContainer}>
-        {['Today', 'Overdue', 'All'].map((tab) => (
+        {['Today', 'Upcoming', 'Delivered'].map((tab) => (
           <TouchableOpacity
             key={tab}
             style={[styles.tabBtn, activeTab === tab && styles.tabBtnActive]}
@@ -579,6 +596,8 @@ const styles = StyleSheet.create({
     color: '#666666',
     fontWeight: '500',
     lineHeight: 16,
+    textAlign: 'left',
+    marginLeft: 5,
     marginBottom: 16,
     flex: 1,
   },

@@ -16,6 +16,7 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SERVER_URL } from '../config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storeTokens } from '../authStorage';
 
 
 const PRIMARY_COLOR = '#004aad';
@@ -35,33 +36,7 @@ const LoginScreen = ({ navigation }: any) => {
     setLoading(true);
 
     try {
-      /* =========================
-         ✅ DUMMY LOGIN (DEV MODE)
-         ========================= */
-      if (email === 'aravindh' && password === '1234') {
-
-
-        navigation.replace('TeamLeadDashboard');
-        return; // ⛔ stop backend call
-      }
-      if (email === 'aravindh' && password === '5678') {
-
-
-        navigation.replace('DirectorDashboard');
-        return; // ⛔ stop backend call
-      }
-
-      // STORE MANAGER
-      if (email === 'aravind' && password === '123') {
-
-        navigation.replace('StoreManagerDashboard');
-        return; // ⛔ stop backend call
-      }
-
-
-      /* =========================
-         🔗 REAL BACKEND LOGIN
-         ========================= */
+      // Call backend login API
       const response = await fetch(`${SERVER_URL}/auth/login`, {
         method: 'POST',
         headers: {
@@ -84,19 +59,33 @@ const LoginScreen = ({ navigation }: any) => {
       }
 
       if (data?.access_token) {
-        await AsyncStorage.setItem('access_token', data.access_token);
+        // Store both tokens securely
+        await storeTokens(data.access_token, data.refresh_token || '');
 
-        /* ✅ SAFE ROLE HANDLING */
-        const role =
-          data.role ||
-          (email.toUpperCase().startsWith('SM')
-            ? 'STORE_MANAGER'
-            : 'SALES');
+        // Navigate based on role from backend
+        const role = data.role;
 
-        if (role === 'STORE_MANAGER') {
-          navigation.replace('StoreManagerDashboard');
-        } else {
-          navigation.replace('Dashboard', { email });
+        console.log('User role:', role); // Debug log
+
+        // Route to appropriate dashboard based on user role
+        switch (role) {
+          case 'DIRECTOR':
+            navigation.replace('DirectorDashboard');
+            break;
+          case 'TEAM_LEAD':
+            navigation.replace('TeamLeadDashboard');
+            break;
+          case 'STORE_MANAGER':
+            navigation.replace('StoreManagerDashboard');
+            break;
+          case 'SALES_EXECUTIVE':
+          case 'SALES':
+            navigation.replace('Dashboard', { email });
+            break;
+          default:
+            // Fallback to sales dashboard if role is unknown
+            console.warn('Unknown role:', role, '- defaulting to Sales Dashboard');
+            navigation.replace('Dashboard', { email });
         }
 
       } else {
